@@ -77,6 +77,116 @@ elseif(empty($_GET)){
         exit;   
     } 
 
+    try{
+
+
+        $user_name = $json_data->username;
+        $user_password = $json_data->password;
+
+        $query = $writeDB->prepare('SELECT user_id, user_fullname, user_name, user_active, user_login_attempts FROM users WHERE user_name = :username');
+        $query->bindParam(':username', $user_name, PDO::PARAM_STR);
+        $query->exeute();
+
+        $row_count = $query->rowCount();
+        
+        if($row_count === 0){
+            $response = new Response();
+            $response->setHttpStatusCode(401);//unauthorized
+            $response->setSuccess(false);
+            $response->addMessage('Username or password are incorrect.');
+            $response->send();
+            exit;    
+        }
+
+        $row = $query->fetch(PDO::FETCH_ASSOC);
+
+        $returned_id = $row['user_id'];
+        $returned_fullname = $row['user_fullname'];
+        $returned_user_name = $row['user_name'];
+        $returned_password = $row['user_password'];
+        $returned_user_active = $row['user_active'];
+        $returned_user_login_attempts = $row['user_login_attempts'];
+
+        //validate user active
+        if($returned_user_active !== 'Y'){
+            $response = new Response();
+            $response->setHttpStatusCode(401);//unauthorized
+            $response->setSuccess(false);
+            $response->addMessage('User is not active.');
+            $response->send();
+            exit;    
+        }
+
+        //count login attempts
+        if($returned_user_login_attempts >= 3){
+            $response = new Response();
+            $response->setHttpStatusCode(401);//unauthorized
+            $response->setSuccess(false);
+            $response->addMessage('User account is locked.');
+            $response->send();
+            exit;    
+        }
+
+        //validate password
+        if(!password_verify($user_password, $returned_password)){
+            $query = $writeDB->prepare('UPDATE users SET user_login_attempts = user_login_attempts + 1 WHERE user_id = :userid');
+            $query->bindParam(':userid', $returned_id, PDO::PARAM_INT);
+            $query->execute();
+
+            $response = new Response();
+            $response->setHttpStatusCode(401);//unauthorized
+            $response->setSuccess(false);
+            $response->addMessage('Incorrect login credentials.');
+            $response->send();
+            exit;    
+        }
+
+        //client has to secure this!!!
+        $access_token = base64_encode(bin2hex(openssl_random_pseudo_bytes(24).time()));
+        $refresh_token = base64_encode(bin2hex(openssl_random_pseudo_bytes(24).time()));
+
+
+        $access_token_expiry_seconds = 1200;
+        $refresh_token_expiry_seconds = 1209600;
+
+    }
+    catch(PDOException $ex){
+        $response = new Response();
+        $response->setHttpStatusCode(500);
+        $response->setSuccess(false);
+        $response->addMessage('Login failed.');
+        $response->send();
+        exit;    
+    }
+
+
+    try{
+
+        //create transaction
+        $writeDB->beginTransaction();
+
+        $query = $writeDB->prepare('UPDATE users SET user_login_attempts = 0 WHERE user_id = :userid');
+        $query->bindParam(':userid', $returned_id, PDO::PARAM_INT);
+        $query->execute();
+        
+        $query = $writeDB->prepare('INSERT INTO user_sessions ( user_id, access_token, access_expiry, refresh_token, refresh_token_expiry) VALUES (:userid, :accesstoken, date_add(NOW(), INTERVAL :accesstokenexpiryseconds SECOND), :refreshtoken, date_add(NOW(), INTERVAL :refreshtokenexpiryseconds SECOND))');
+        $query->bindParam(':userid', $returned_id, PDO::PARAM_INT);
+        $query->bindParam(':accesstoken', $access_token, PDO::PARAM_STR);
+        $query->bindParam(':accesstokenexpiryseconds', $access_token_expiry_seconds, PDO::PARAM_INT);
+
+
+    }
+    catch(PDOException $ex){
+
+        $writeDB->rollBack();//rollback transaction
+
+        $response = new Response();
+        $response->setHttpStatusCode(500);
+        $response->setSuccess(false);
+        $response->addMessage('There was an issue login in, please try Again.');
+        $response->send();
+        exit; 
+    }
     
 
 }
