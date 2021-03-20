@@ -26,10 +26,10 @@ elseif(empty($_GET)){
         $response = new Response();
         $response->setHttpStatusCode(400);
         $response->setSuccess(false);
-        $response->addMessage('Request Method not Allowed.');
+        $response->addMessage('Request Method not Allowed. Only Post');
         $response->send();
         exit;
-    }
+    }//check
 
 
     //against bruteforcer
@@ -37,11 +37,11 @@ elseif(empty($_GET)){
 
     if($_SERVER['CONTENT_TYPE'] !== 'application/json'){
         $response = new Response();
-        $response->setHttpStatusCode(400);
+        $response->setHttpStatusCode(400);//400
         $response->setSuccess(false);
         $response->addMessage('Content type header not Allowed.');
         $response->send();
-        exit;
+        exit;//check
     }
 
     $raw_post_data = file_get_contents('php://input');
@@ -50,12 +50,12 @@ elseif(empty($_GET)){
         $response = new Response();
         $response->setHttpStatusCode(400);
         $response->setSuccess(false);
-        $response->addMessage('Content type not Allowed.');
+        $response->addMessage('Content type not Allowed, incorrect json format.');
         $response->send();
         exit;
     }
 
-    if(isset($json_data->username) || isset($json_data->password)){
+    if(!isset($json_data->username) || !isset($json_data->password)){
         $response = new Response();
         $response->setHttpStatusCode(400);
         $response->setSuccess(false);
@@ -71,8 +71,8 @@ elseif(empty($_GET)){
         $response->setSuccess(false);
         (strlen($json_data->username) < 1 ? $response->addMessage('Username not provided.') : false);
         (strlen($json_data->username) > 255 ? $response->addMessage('User name cannot be over 255 characters.') : false);
-        (strlen($json_data->username) < 1 ? $response->addMessage('Password not provided.') : false);
-        (strlen($json_data->username) > 255 ? $response->addMessage('Password cannot be over 255 characters.') : false);
+        (strlen($json_data->password) < 1 ? $response->addMessage('Password not provided.') : false);
+        (strlen($json_data->password) > 255 ? $response->addMessage('Password cannot be over 255 characters.') : false);
         $response->send();
         exit;   
     } 
@@ -83,9 +83,9 @@ elseif(empty($_GET)){
         $user_name = $json_data->username;
         $user_password = $json_data->password;
 
-        $query = $writeDB->prepare('SELECT user_id, user_fullname, user_name, user_active, user_login_attempts FROM users WHERE user_name = :username');
+        $query = $writeDB->prepare('SELECT user_id, user_fullname, user_name, user_password, user_active, user_login_attempts FROM users WHERE user_name = :username');
         $query->bindParam(':username', $user_name, PDO::PARAM_STR);
-        $query->exeute();
+        $query->execute();
 
         $row_count = $query->rowCount();
         
@@ -162,7 +162,7 @@ elseif(empty($_GET)){
 
     try{
 
-        //create transaction
+        //begin transaction
         $writeDB->beginTransaction();
 
         $query = $writeDB->prepare('UPDATE users SET user_login_attempts = 0 WHERE user_id = :userid');
@@ -173,7 +173,28 @@ elseif(empty($_GET)){
         $query->bindParam(':userid', $returned_id, PDO::PARAM_INT);
         $query->bindParam(':accesstoken', $access_token, PDO::PARAM_STR);
         $query->bindParam(':accesstokenexpiryseconds', $access_token_expiry_seconds, PDO::PARAM_INT);
+        $query->bindParam(':refreshtoken', $refresh_token, PDO::PARAM_STR);
+        $query->bindParam(':refreshtokenexpiryseconds', $refresh_token_expiry_seconds, PDO::PARAM_INT);
+        $query->execute();
 
+        $last_session_id = $writeDB->lastInsertId();
+
+        $writeDB->commit();//commit
+
+
+        $return_data = array();
+        $return_data['session_id'] = intval($last_session_id);
+        $return_data['access_token'] = $access_token;
+        $return_data['access_token_expires_in'] = $access_token_expiry_seconds;
+        $return_data['refresh_token'] = $refresh_token;
+        $return_data['refresh_token_expires_in'] = $refresh_token_expiry_seconds;
+
+        $response = new Response();
+        $response->setHttpStatusCode(201);//created session
+        $response->setSuccess(true);
+        $response->setData($return_data);
+        $response->send();
+        exit; 
 
     }
     catch(PDOException $ex){
